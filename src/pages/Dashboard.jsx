@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Terminal, Search, Plus, Moon, Sun, LogOut, Code2, Save, X, Hash } from 'lucide-react';
+import { Terminal, Search, Plus, Moon, Sun, LogOut, Code2, Save, X, Hash, Globe, LayoutGrid } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
@@ -192,7 +192,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg-main)]">
+    <div className="min-h-screen flex flex-col bg-[var(--bg-main)] pb-20 md:pb-0">
       {/* --- HEADER --- */}
       <header className="h-16 border-b border-[var(--border)] bg-[var(--bg-card)] sticky top-0 z-10 px-6 flex items-center justify-between">
         <div className="flex items-center gap-8">
@@ -203,7 +203,7 @@ export default function Dashboard() {
             <span className="font-bold text-lg tracking-tight hidden sm:block">Snippet Vault</span>
           </div>
 
-          {/* Navegación Central */}
+          {/* Navegación Central (Solo Desktop) */}
           <nav className="hidden md:flex gap-1 bg-[var(--bg-main)] p-1 rounded-lg border border-[var(--border)]">
              <span className="px-4 py-1.5 text-sm rounded-md bg-[var(--bg-card)] shadow-sm font-bold text-[var(--accent)]">
                 Mis Snippets
@@ -215,6 +215,7 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-4">
+          {/* Buscador Header (Solo Desktop) */}
           <div className="hidden md:flex items-center gap-2 bg-[var(--bg-main)] px-3 py-1.5 rounded-lg border border-[var(--border)]">
             <Search size={16} className="text-[var(--text-secondary)]" />
             <input 
@@ -237,28 +238,43 @@ export default function Dashboard() {
       </header>
 
       {/* --- MAIN CONTENT --- */}
-      <main className="flex-grow p-6 max-w-7xl mx-auto w-full">
+      <main className="flex-grow p-4 md:p-6 max-w-7xl mx-auto w-full">
+        
+        {/* --- BUSCADOR MÓVIL (Visible solo en pantallas pequeñas) --- */}
+        <div className="md:hidden mb-6">
+          <div className="flex items-center gap-2 bg-[var(--bg-card)] px-4 py-3 rounded-xl border border-[var(--border)] shadow-sm focus-within:border-[var(--accent)] transition-colors">
+            <Search size={18} className="text-[var(--text-secondary)]" />
+            <input 
+              type="text" 
+              placeholder="Buscar en mis snippets..." 
+              className="bg-transparent border-none focus:outline-none text-base w-full text-[var(--text-primary)]"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
           <div>
             <h2 className="text-2xl font-bold mb-1">Mis Fragmentos</h2>
             <p className="text-[var(--text-secondary)] text-sm">Gestiona código en Python, Java, Scala, R y SQL.</p>
           </div>
           <div className="flex gap-3 w-full sm:w-auto">
-             <div className="flex bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-1">
+             <div className="flex bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-1 w-full sm:w-auto justify-center sm:justify-start">
                 <button 
                   onClick={() => setFilter('all')}
-                  className={`px-3 py-1.5 text-xs rounded-md transition-all ${filter === 'all' ? 'bg-[var(--bg-main)] shadow-sm font-bold' : 'text-[var(--text-secondary)]'}`}
+                  className={`flex-1 sm:flex-none px-3 py-1.5 text-xs rounded-md transition-all ${filter === 'all' ? 'bg-[var(--bg-main)] shadow-sm font-bold' : 'text-[var(--text-secondary)]'}`}
                 >
                   Todo
                 </button>
                 <button 
                   onClick={() => setFilter('favorites')}
-                  className={`px-3 py-1.5 text-xs rounded-md transition-all ${filter === 'favorites' ? 'bg-[var(--bg-main)] shadow-sm font-bold text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}
+                  className={`flex-1 sm:flex-none px-3 py-1.5 text-xs rounded-md transition-all ${filter === 'favorites' ? 'bg-[var(--bg-main)] shadow-sm font-bold text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}
                 >
                   Favoritos
                 </button>
              </div>
-            <Button onClick={() => openEditor(null)}>
+            <Button onClick={() => openEditor(null)} className="hidden md:flex">
               <Plus size={18} /> Nuevo
             </Button>
           </div>
@@ -287,6 +303,26 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {/* --- BOTTOM NAVIGATION BAR (Solo Móvil) --- */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[var(--bg-card)] border-t border-[var(--border)] flex justify-around items-center p-3 z-40 pb-6 shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
+        <Link to="/dashboard" className="flex flex-col items-center gap-1 text-[var(--accent)]">
+           <LayoutGrid size={24} />
+           <span className="text-[10px] font-bold">Mis Snippets</span>
+        </Link>
+        
+        <button 
+          onClick={() => openEditor(null)}
+          className="flex flex-col items-center justify-center -mt-8 bg-[var(--accent)] text-white w-14 h-14 rounded-full shadow-lg shadow-[var(--accent)]/40 border-4 border-[var(--bg-main)]"
+        >
+           <Plus size={28} />
+        </button>
+
+        <Link to="/explore" className="flex flex-col items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+           <Globe size={24} />
+           <span className="text-[10px] font-medium">Explorar</span>
+        </Link>
+      </nav>
 
       {/* --- MODAL EDITOR --- */}
       {isEditorOpen && (
