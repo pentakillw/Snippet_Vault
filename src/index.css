@@ -1,0 +1,37 @@
+/* IMPORTANTE: @import siempre debe ser la primera línea */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+/* Reseteo básico y scrollbars personalizadas */
+@layer base {
+  body {
+    @apply bg-[#121414] text-[#E8E2D1] antialiased selection:bg-[#029CA3] selection:text-white;
+  }
+}
+
+/* Scrollbar elegante */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-[#2A2D2D] rounded-full border-2 border-[#121414];
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-[#029CA3];
+}
