@@ -7,11 +7,8 @@ export default function CodeEditor({ code, onChange, language = 'python', readOn
   const { isDark } = useTheme();
   const monaco = useMonaco();
   
-  // Estado local para el valor inmediato del editor
-  // Esto desacopla la escritura rápida del renderizado de React
   const [localValue, setLocalValue] = useState(code);
 
-  // Actualizar valor local si cambia el prop code externamente (ej: al cargar un snippet)
   useEffect(() => {
     if (code !== localValue) {
       setLocalValue(code);
@@ -19,7 +16,6 @@ export default function CodeEditor({ code, onChange, language = 'python', readOn
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
-  // Mapeo de lenguajes para Monaco Editor
   const languageMap = {
     python: 'python',
     javascript: 'javascript',
@@ -37,25 +33,18 @@ export default function CodeEditor({ code, onChange, language = 'python', readOn
   };
 
   const mappedLanguage = languageMap[language] || 'plaintext';
-
-  // Debounce manual usando useRef para no perder la referencia del timer
   const debounceRef = useRef(null);
 
   const handleEditorChange = (value) => {
-    setLocalValue(value); // Actualización visual inmediata
-
+    setLocalValue(value);
     if (onChange) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      
-      // Esperar 300ms antes de avisar al componente padre
-      // Esto evita re-renderizar todo el Dashboard con cada tecla
       debounceRef.current = setTimeout(() => {
         onChange(value);
       }, 300);
     }
   };
 
-  // Definición de temas
   useEffect(() => {
     if (monaco) {
       monaco.editor.defineTheme('vault-dark', {
@@ -67,7 +56,6 @@ export default function CodeEditor({ code, onChange, language = 'python', readOn
           'editor.lineHighlightBackground': '#2A2D2D',
         }
       });
-
       monaco.editor.defineTheme('vault-light', {
         base: 'vs',
         inherit: true,
@@ -81,7 +69,7 @@ export default function CodeEditor({ code, onChange, language = 'python', readOn
   }, [monaco]);
 
   return (
-    <div className="h-full w-full overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)] flex flex-col relative">
+    <div className="h-full w-full overflow-hidden md:rounded-lg border border-[var(--border)] bg-[var(--bg-card)] flex flex-col relative">
       {/* Header */}
       <div className="h-8 bg-[var(--bg-main)] border-b border-[var(--border)] flex items-center px-4 justify-between select-none shrink-0">
         <span className="text-xs font-bold uppercase text-[var(--text-secondary)] tracking-wider flex items-center gap-2">
@@ -92,7 +80,7 @@ export default function CodeEditor({ code, onChange, language = 'python', readOn
       </div>
       
       {/* Editor Container */}
-      <div className="flex-grow relative">
+      <div className="flex-grow relative h-full">
         <Editor
           height="100%"
           language={mappedLanguage}
@@ -106,18 +94,19 @@ export default function CodeEditor({ code, onChange, language = 'python', readOn
           }
           options={{
             readOnly: readOnly,
-            minimap: { enabled: false },
+            minimap: { enabled: false }, // Deshabilitado en todos por performance móvil
             fontSize: 14,
             lineNumbers: 'on',
             scrollBeyondLastLine: false,
-            automaticLayout: true, // Nota: Esto consume recursos, pero es necesario para responsive
+            automaticLayout: true, 
             fontFamily: '"JetBrains Mono", monospace',
             padding: { top: 16, bottom: 16 },
             tabSize: 2,
             renderWhitespace: 'selection',
             smoothScrolling: true,
             cursorBlinking: 'smooth',
-            cursorSmoothCaretAnimation: 'on'
+            cursorSmoothCaretAnimation: 'on',
+            wordWrap: 'on' // Importante para móvil
           }}
         />
       </div>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { Globe, Search, Moon, Sun, LogOut, LayoutGrid, Loader, ArrowDown } from 'lucide-react';
+import { Globe, Search, Moon, Sun, LogOut, LayoutGrid, Loader, ArrowDown, Menu, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
@@ -13,30 +13,21 @@ export default function Explore() {
   const { toggleTheme, isDark } = useTheme();
   const toast = useToast();
   const [search, setSearch] = useState('');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // --- REACT QUERY: Paginación Infinita ---
   const fetchPublicSnippets = async ({ pageParam = 0 }) => {
     const ITEMS_PER_PAGE = 12;
     const from = pageParam * ITEMS_PER_PAGE;
     const to = from + ITEMS_PER_PAGE - 1;
-
     let query = supabase
       .from('snippets')
       .select('*')
       .eq('in_community', true)
       .order('created_at', { ascending: false })
       .range(from, to);
-
-    // Si hay búsqueda, usamos ilike (requiere índice en BD para performance óptima)
-    if (search) {
-      query = query.ilike('title', `%${search}%`);
-    }
-
+    if (search) query = query.ilike('title', `%${search}%`);
     const { data, error } = await query;
     if (error) throw error;
-    
-    // NOTA: El filtrado de expiración debe hacerse en el BACKEND con RLS
-    // para seguridad real. Aquí solo filtramos visualmente por si acaso.
     return data.filter(s => !s.public_expires_at || new Date(s.public_expires_at) > new Date());
   };
 
@@ -47,14 +38,13 @@ export default function Explore() {
     isFetchingNextPage,
     isLoading
   } = useInfiniteQuery({
-    queryKey: ['explore', search], // Se recarga al cambiar búsqueda
+    queryKey: ['explore', search], 
     queryFn: fetchPublicSnippets,
     getNextPageParam: (lastPage, allPages) => {
       return lastPage.length === 12 ? allPages.length : undefined;
     },
-    staleTime: 1000 * 60 * 2 // Cache de 2 min
+    staleTime: 1000 * 60 * 2 
   });
-
   const snippets = data?.pages.flat() || [];
 
   const handleClone = async (snippet) => {
@@ -70,7 +60,7 @@ export default function Explore() {
         tags: snippet.tags,
         is_public: false,
         in_community: false,
-        original_id: snippet.id // Guardamos referencia para futuro
+        original_id: snippet.id
       }]);
       if (error) throw error;
       toast.success('Snippet guardado en tu Dashboard');
@@ -82,8 +72,8 @@ export default function Explore() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-main)]">
-      <header className="h-16 border-b border-[var(--border)] bg-[var(--bg-card)] sticky top-0 z-30 px-6 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-8">
+      <header className="h-16 border-b border-[var(--border)] bg-[var(--bg-card)] sticky top-0 z-30 px-4 md:px-6 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-4">
           <div className="flex items-center gap-3">
             <div className="bg-[var(--accent)] text-white p-1.5 rounded-md shadow-lg shadow-[var(--accent)]/20">
               <Globe size={20} />
@@ -96,8 +86,8 @@ export default function Explore() {
           </nav>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="hidden md:flex items-center gap-2 bg-[var(--bg-main)] px-3 py-1.5 rounded-lg border border-[var(--border)] focus-within:border-[var(--accent)] transition-colors">
+        <div className="hidden md:flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-[var(--bg-main)] px-3 py-1.5 rounded-lg border border-[var(--border)] focus-within:border-[var(--accent)] transition-colors">
             <Search size={16} className="text-[var(--text-secondary)]" />
             <input 
               type="text" 
@@ -108,16 +98,51 @@ export default function Explore() {
             />
           </div>
           <button onClick={toggleTheme} className="p-2 hover:bg-[var(--bg-main)] rounded-full transition-colors text-[var(--text-primary)]">
-            {isDark ? <Sun size={20} /> : <Moon size={20} />}
+             {isDark ? <Sun size={20} /> : <Moon size={20} />}
           </button>
           <div className="h-6 w-px bg-[var(--border)] mx-2" />
           <button onClick={signOut} className="p-2 hover:text-red-400 transition-colors text-[var(--text-secondary)]">
             <LogOut size={18} />
           </button>
         </div>
+
+        {/* Mobile Toggle */}
+        <div className="flex md:hidden items-center gap-3">
+           <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 text-[var(--text-primary)]">
+             {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+           </button>
+        </div>
       </header>
 
-      <main className="flex-grow p-6 max-w-7xl mx-auto w-full">
+      {/* Mobile Menu */}
+      {isMobileMenuOpen && (
+        <div className="md:hidden fixed top-16 left-0 right-0 bg-[var(--bg-card)] border-b border-[var(--border)] z-20 p-4 flex flex-col gap-4 shadow-2xl animate-fade-in">
+           <nav className="flex flex-col gap-2">
+             <Link to="/dashboard" className="px-3 py-2 text-[var(--text-secondary)] hover:bg-[var(--bg-main)] rounded-md text-sm">Mis Snippets</Link>
+             <div className="px-3 py-2 bg-[var(--accent)]/10 text-[var(--accent)] rounded-md font-bold text-sm">Explorar Comunidad</div>
+           </nav>
+           <div className="flex items-center gap-2 bg-[var(--bg-main)] px-3 py-2 rounded-lg border border-[var(--border)]">
+              <Search size={16} className="text-[var(--text-secondary)]" />
+              <input 
+                type="text" 
+                placeholder="Buscar..." 
+                className="bg-transparent border-none focus:outline-none text-sm w-full text-[var(--text-primary)]"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+           </div>
+           <div className="flex justify-between items-center border-t border-[var(--border)] pt-4">
+              <button onClick={toggleTheme} className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                 {isDark ? <><Sun size={16} /> Modo Claro</> : <><Moon size={16} /> Modo Oscuro</>}
+              </button>
+              <button onClick={signOut} className="flex items-center gap-2 text-sm text-red-400">
+                 <LogOut size={16} /> Salir
+              </button>
+           </div>
+        </div>
+      )}
+
+      <main className="flex-grow p-4 md:p-6 max-w-7xl mx-auto w-full">
         <div className="mb-8 text-center md:text-left">
             <h2 className="text-3xl font-bold mb-2 text-[var(--text-primary)]">Catálogo Global</h2>
             <p className="text-[var(--text-secondary)]">Descubre soluciones verificadas por desarrolladores de todo el mundo.</p>
@@ -127,7 +152,7 @@ export default function Explore() {
            <div className="flex justify-center py-20"><Loader className="animate-spin text-[var(--accent)]" size={40} /></div>
         ) : snippets.length > 0 ? (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 animate-fade-in">
               {snippets.map(snippet => (
                 <SnippetCard 
                   key={snippet.id} 
@@ -140,7 +165,7 @@ export default function Explore() {
             </div>
             
             {hasNextPage && (
-              <div className="mt-10 text-center">
+              <div className="mt-10 text-center pb-10">
                 <button 
                   onClick={() => fetchNextPage()} 
                   disabled={isFetchingNextPage}
