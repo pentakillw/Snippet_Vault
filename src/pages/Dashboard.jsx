@@ -1,5 +1,7 @@
-import { useState, useMemo, useEffect } from 'react';
-import { Terminal, Search, Plus, Moon, Sun, LogOut, Code2, Save, X, Hash, Globe, LayoutGrid } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom'; 
+import { Terminal, Search, Plus, Moon, Sun, LogOut, Code2, Save, X, Hash, User, Settings, Filter, Loader, ArrowDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
@@ -7,124 +9,68 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import Select from '../components/ui/Select';
 import SnippetCard from '../features/snippets/SnippetCard';
 import CodeEditor from '../features/snippets/CodeEditor';
+import StatsWidget from '../components/StatsWidget'; 
+
+// --- CONSTANTES ---
+const CATEGORIES = [
+  { value: 'general', label: 'General' },
+  { value: 'frontend', label: 'Frontend' },
+  { value: 'backend', label: 'Backend' },
+  { value: 'database', label: 'Database' },
+  { value: 'devops', label: 'DevOps' },
+  { value: 'testing', label: 'Testing' },
+  { value: 'data-science', label: 'Data Science' },
+  { value: 'power-platform', label: 'Power Platform' },
+  { value: 'utils', label: 'Utilidades' }
+];
+
+const LANGUAGES = [
+  { value: 'python', label: 'Python' },
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'java', label: 'Java' },
+  { value: 'sql', label: 'SQL' },
+  { value: 'r', label: 'R Stats' },
+  { value: 'powerfx', label: 'Power Apps (Power FX)' },
+  { value: 'dax', label: 'Power BI (DAX)' },
+  { value: 'm', label: 'Power Query (M)' },
+  { value: 'excel', label: 'Excel Formulas' },
+  { value: 'scala', label: 'Scala' },
+  { value: 'html', label: 'HTML' },
+  { value: 'css', label: 'CSS' },
+  { value: 'json', label: 'JSON' },
+  { value: 'bash', label: 'Bash/Shell' }
+];
 
 export default function Dashboard() {
   const { signOut, user } = useAuth();
   const { toggleTheme, isDark } = useTheme();
   const toast = useToast();
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams(); 
   
-  // --- ESTADOS PRINCIPALES ---
-  const [snippets, setSnippets] = useState([]);
+  // Estados UI
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all');
+  const [filterType, setFilterType] = useState('all'); // all | favorites
+  const [filterCategory, setFilterCategory] = useState('');
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  
+  // Estados Formulario
   const [currentSnippet, setCurrentSnippet] = useState(null);
-  const [loadingSnippets, setLoadingSnippets] = useState(true);
-
-  // --- ESTADOS DEL FORMULARIO (Para crear/editar) ---
   const [formTitle, setFormTitle] = useState('');
   const [formDesc, setFormDesc] = useState('');
   const [formCategory, setFormCategory] = useState('general');
   const [formCode, setFormCode] = useState('');
-  const [formLanguage, setFormLanguage] = useState('python'); // Lenguaje seleccionado
-  const [formTags, setFormTags] = useState([]); // Lista de etiquetas
-  const [tagInput, setTagInput] = useState(''); // Input temporal para etiquetas
+  const [formLanguage, setFormLanguage] = useState('python');
+  const [formTags, setFormTags] = useState([]);
+  const [tagInput, setTagInput] = useState('');
 
-  // --- CARGAR SNIPPETS ---
-  useEffect(() => {
-    async function fetchSnippets() {
-      try {
-        const { data, error } = await supabase
-          .from('snippets')
-          .select('*')
-          .order('created_at', { ascending: false });
-          
-        if (error) throw error;
-        setSnippets(data || []);
-      } catch (error) {
-        console.error('Error fetching snippets:', error);
-        toast.error('Error cargando snippets');
-      } finally {
-        setLoadingSnippets(false);
-      }
-    }
-    
-    fetchSnippets();
-  }, [toast]);
-
-  // --- FILTRADO Y BÚSQUEDA ---
-  const filteredSnippets = useMemo(() => {
-    return snippets.filter(s => {
-      const searchLower = search.toLowerCase();
-      // Búsqueda: Título, Código o TAGS
-      const matchesSearch = s.title.toLowerCase().includes(searchLower) || 
-                            s.code.toLowerCase().includes(searchLower) ||
-                            (s.tags && s.tags.some(tag => tag.toLowerCase().includes(searchLower)));
-
-      const matchesFilter = filter === 'favorites' ? s.is_favorite : true;
-      return matchesSearch && matchesFilter;
-    });
-  }, [snippets, search, filter]);
-
-  // --- ACCIONES DE TARJETA ---
-  const handleCopy = async (snippet) => {
-    navigator.clipboard.writeText(snippet.code);
-    toast.success('Código copiado al portapapeles');
-
-    const newCount = (snippet.usage_count || 0) + 1;
-    setSnippets(prev => prev.map(s => s.id === snippet.id ? { ...s, usage_count: newCount } : s));
-    
-    await supabase.from('snippets').update({ usage_count: newCount }).eq('id', snippet.id);
-  };
-
-  const handleDelete = async (id) => {
-    if (!confirm('¿Eliminar este snippet permanentemente?')) return;
-    
-    try {
-      setSnippets(prev => prev.filter(s => s.id !== id));
-      const { error } = await supabase.from('snippets').delete().eq('id', id);
-      if (error) throw error;
-      toast.success('Snippet eliminado');
-    } catch (error) {
-      console.error(error);
-      toast.error('No se pudo eliminar');
-    }
-  };
-
-  const handleToggleFav = async (id, currentStatus) => {
-    setSnippets(prev => prev.map(s => s.id === id ? { ...s, is_favorite: !currentStatus } : s));
-    
-    try {
-      const { error } = await supabase.from('snippets').update({ is_favorite: !currentStatus }).eq('id', id);
-      if (error) throw error;
-    } catch (error) {
-      console.error(error);
-      toast.error('Error actualizando favoritos');
-    }
-  };
-
-  // --- GESTIÓN DE ETIQUETAS (TAGS) ---
-  const handleAddTag = (e) => {
-    if (e.key === 'Enter' || e.type === 'click') {
-      e.preventDefault(); // Evita submit del form si se usa Enter
-      const newTag = tagInput.trim().toLowerCase();
-      if (newTag && !formTags.includes(newTag)) {
-        setFormTags([...formTags, newTag]);
-        setTagInput('');
-      }
-    }
-  };
-
-  const handleRemoveTag = (tagToRemove) => {
-    setFormTags(formTags.filter(tag => tag !== tagToRemove));
-  };
-
-  // --- ABRIR EDITOR (Nuevo o Editar) ---
-  const openEditor = (snippet = null) => {
+  // 4. DEFINICIÓN DE FUNCIONES
+  const openEditor = useCallback((snippet = null) => {
     if (snippet) {
-      // Cargar datos existentes
       setCurrentSnippet(snippet);
       setFormTitle(snippet.title);
       setFormDesc(snippet.description);
@@ -133,7 +79,6 @@ export default function Dashboard() {
       setFormTags(snippet.tags || []);
       setFormLanguage(snippet.language || 'python');
     } else {
-      // Resetear formulario
       setCurrentSnippet(null);
       setFormTitle('');
       setFormDesc('');
@@ -144,311 +89,347 @@ export default function Dashboard() {
     }
     setTagInput('');
     setIsEditorOpen(true);
+  }, []); 
+
+  // 5. EFECTOS
+  useEffect(() => {
+    const action = searchParams.get('action');
+    if (action === 'create') {
+        setTimeout(() => { openEditor(null); }, 0);
+        setSearchParams(prev => {
+            const newParams = new URLSearchParams(prev);
+            newParams.delete('action');
+            return newParams;
+        }, { replace: true });
+    }
+  }, [searchParams, setSearchParams, openEditor]); 
+
+  // --- REACT QUERY CON PAGINACIÓN Y FILTROS ---
+  const fetchMySnippets = async ({ pageParam = 0 }) => {
+    const ITEMS_PER_PAGE = 12;
+    const from = pageParam * ITEMS_PER_PAGE;
+    const to = from + ITEMS_PER_PAGE - 1;
+
+    let query = supabase
+      .from('snippets')
+      .select('*', { count: 'exact' }) // Pedimos el total para saber si hay más
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    // APLICAR FILTROS EN SERVIDOR (Mucho más rápido)
+    // 1. Solo mis snippets
+    // Nota: Aunque RLS ya filtra, es buena práctica ser explícito
+    query = query.eq('user_id', user.id);
+
+    // 2. Filtro de búsqueda (Título)
+    if (search) {
+      query = query.ilike('title', `%${search}%`);
+    }
+
+    // 3. Filtro de Favoritos
+    if (filterType === 'favorites') {
+      query = query.eq('is_favorite', true);
+    }
+
+    // 4. Filtro de Categoría
+    if (filterCategory) {
+      query = query.eq('category', filterCategory);
+    }
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    
+    return { data, count };
   };
 
-  // --- GUARDAR SNIPPET (Create / Update) ---
-  const handleSave = async () => {
-    if (!formTitle || !formCode) return toast.error('Título y Código son obligatorios');
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading
+  } = useInfiniteQuery({
+    queryKey: ['my-snippets', user?.id, search, filterType, filterCategory], // Clave compuesta para reaccionar a filtros
+    queryFn: fetchMySnippets,
+    getNextPageParam: (lastPage, allPages) => {
+      // Si la última página trajo menos items que el límite, no hay más
+      if (lastPage.data.length < 12) return undefined;
+      return allPages.length;
+    },
+    staleTime: 1000 * 60 * 5 // 5 minutos de caché
+  });
 
-    const snippetData = {
+  const snippets = data?.pages.flatMap(page => page.data) || [];
+  const totalCount = data?.pages[0]?.count || 0;
+
+  // --- MUTACIONES ---
+  const saveMutation = useMutation({
+    mutationFn: async (snippetData) => {
+      if (currentSnippet) {
+        const { data, error } = await supabase.from('snippets').update(snippetData).eq('id', currentSnippet.id).select();
+        if (error) throw error; return data[0];
+      } else {
+        const { data, error } = await supabase.from('snippets').insert([{ ...snippetData, user_id: user.id }]).select();
+        if (error) throw error; return data[0];
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['my-snippets']); // Invalida la query paginada
+      toast.success(currentSnippet ? 'Actualizado' : 'Creado');
+      setIsEditorOpen(false);
+    },
+    onError: (err) => toast.error(err.message)
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id) => {
+       const { error } = await supabase.from('snippets').delete().eq('id', id);
+       if (error) throw error;
+    },
+    onSuccess: () => {
+       queryClient.invalidateQueries(['my-snippets']);
+       toast.success('Eliminado');
+    },
+    onError: () => toast.error('Error al eliminar')
+  });
+
+  const toggleFavMutation = useMutation({
+    mutationFn: async ({ id, is_favorite }) => {
+       const { error } = await supabase.from('snippets').update({ is_favorite }).eq('id', id);
+       if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries(['my-snippets'])
+  });
+
+  const handleSave = useCallback(() => {
+    if (!formTitle || !formCode) return toast.error('Título y Código requeridos');
+    saveMutation.mutate({
       title: formTitle,
       description: formDesc,
       category: formCategory,
       code: formCode,
-      language: formLanguage, // Guardamos lenguaje
-      tags: formTags,         // Guardamos tags
-      updated_at: new Date().toISOString(),
-      user_id: user.id
-    };
+      language: formLanguage,
+      tags: formTags,
+      updated_at: new Date().toISOString()
+    });
+  }, [formTitle, formCode, formDesc, formCategory, formLanguage, formTags, saveMutation, toast]);
 
-    try {
-      if (currentSnippet) {
-        // ACTUALIZAR
-        const { data, error } = await supabase
-          .from('snippets')
-          .update(snippetData)
-          .eq('id', currentSnippet.id)
-          .select();
-          
-        if (error) throw error;
-        setSnippets(prev => prev.map(s => s.id === currentSnippet.id ? data[0] : s));
-        toast.success('Snippet actualizado correctamente');
-      } else {
-        // CREAR NUEVO
-        const { data, error } = await supabase
-          .from('snippets')
-          .insert([{ ...snippetData, usage_count: 0, is_favorite: false }])
-          .select();
-          
-        if (error) throw error;
-        setSnippets(prev => [data[0], ...prev]);
-        toast.success('Snippet creado con éxito');
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (isEditorOpen) handleSave();
       }
-      setIsEditorOpen(false);
-    } catch (error) {
-      console.error(error);
-      toast.error('Error al guardar: ' + error.message);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isEditorOpen, handleSave]);
+
+  const handleAddTag = (e) => {
+    if (e.key === 'Enter' || e.type === 'click') {
+      e.preventDefault();
+      const newTag = tagInput.trim().toLowerCase();
+      if (newTag && !formTags.includes(newTag)) {
+        setFormTags([...formTags, newTag]);
+        setTagInput('');
+      }
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-main)] pb-20 md:pb-0">
-      {/* --- HEADER --- */}
-      <header className="h-16 border-b border-[var(--border)] bg-[var(--bg-card)] sticky top-0 z-10 px-6 flex items-center justify-between">
+      {/* Header */}
+      <header className="h-16 border-b border-[var(--border)] bg-[var(--bg-card)] sticky top-0 z-30 px-6 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-3">
-            <div className="bg-[var(--accent)] text-white p-1.5 rounded-md">
+            <div className="bg-[var(--accent)] text-white p-1.5 rounded-md shadow-lg shadow-[var(--accent)]/20">
               <Terminal size={20} />
             </div>
-            <span className="font-bold text-lg tracking-tight hidden sm:block">Snippet Vault</span>
+            <span className="font-bold text-lg tracking-tight hidden sm:block text-[var(--text-primary)]">Snippet Vault</span>
           </div>
-
-          {/* Navegación Central (Solo Desktop) */}
           <nav className="hidden md:flex gap-1 bg-[var(--bg-main)] p-1 rounded-lg border border-[var(--border)]">
-             <span className="px-4 py-1.5 text-sm rounded-md bg-[var(--bg-card)] shadow-sm font-bold text-[var(--accent)]">
-                Mis Snippets
-             </span>
-             <Link to="/explore" className="px-4 py-1.5 text-sm rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)] transition-all">
-                Explorar
-             </Link>
+             <span className="px-4 py-1.5 text-sm rounded-md bg-[var(--bg-card)] shadow-sm font-bold text-[var(--accent)] cursor-default">Mis Snippets</span>
+             <Link to="/explore" className="px-4 py-1.5 text-sm rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)] transition-all">Explorar</Link>
           </nav>
         </div>
 
-        <div className="flex items-center gap-4">
-          {/* Buscador Header (Solo Desktop) */}
-          <div className="hidden md:flex items-center gap-2 bg-[var(--bg-main)] px-3 py-1.5 rounded-lg border border-[var(--border)]">
+        <div className="flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-2 bg-[var(--bg-main)] px-3 py-1.5 rounded-lg border border-[var(--border)] focus-within:border-[var(--accent)] transition-colors">
             <Search size={16} className="text-[var(--text-secondary)]" />
             <input 
               type="text" 
-              placeholder="Buscar comandos o tags..." 
-              className="bg-transparent border-none focus:outline-none text-sm w-48"
+              placeholder="Buscar..." 
+              className="bg-transparent border-none focus:outline-none text-sm w-40 text-[var(--text-primary)]"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
           
+          <Link to="/profile" title="Mi Perfil">
+            <button className="p-2 hover:bg-[var(--bg-main)] rounded-full text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors">
+              <User size={20} />
+            </button>
+          </Link>
+
           <button onClick={toggleTheme} className="p-2 hover:bg-[var(--bg-main)] rounded-full transition-colors text-[var(--text-primary)]">
             {isDark ? <Sun size={20} /> : <Moon size={20} />}
           </button>
-          <div className="h-6 w-px bg-[var(--border)] mx-2" />
-          <button onClick={signOut} className="p-2 hover:text-red-400 transition-colors text-[var(--text-secondary)]">
+          
+          <div className="h-6 w-px bg-[var(--border)] mx-1" />
+          
+          <button onClick={signOut} className="p-2 hover:bg-red-500/10 rounded-full text-[var(--text-secondary)] hover:text-red-500 transition-colors" title="Cerrar Sesión">
             <LogOut size={18} />
           </button>
         </div>
       </header>
 
-      {/* --- MAIN CONTENT --- */}
       <main className="flex-grow p-4 md:p-6 max-w-7xl mx-auto w-full">
         
-        {/* --- BUSCADOR MÓVIL (Visible solo en pantallas pequeñas) --- */}
-        <div className="md:hidden mb-6">
-          <div className="flex items-center gap-2 bg-[var(--bg-card)] px-4 py-3 rounded-xl border border-[var(--border)] shadow-sm focus-within:border-[var(--accent)] transition-colors">
-            <Search size={18} className="text-[var(--text-secondary)]" />
-            <input 
-              type="text" 
-              placeholder="Buscar en mis snippets..." 
-              className="bg-transparent border-none focus:outline-none text-base w-full text-[var(--text-primary)]"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-        </div>
+        {!isLoading && <StatsWidget snippets={snippets} />}
 
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4">
           <div>
-            <h2 className="text-2xl font-bold mb-1">Mis Fragmentos</h2>
-            <p className="text-[var(--text-secondary)] text-sm">Gestiona código en Python, Java, Scala, R y SQL.</p>
+            <h2 className="text-2xl font-bold mb-1 text-[var(--text-primary)]">Mis Fragmentos</h2>
+            <p className="text-[var(--text-secondary)] text-sm">
+              {totalCount} {totalCount === 1 ? 'snippet encontrado' : 'snippets encontrados'}
+            </p>
           </div>
-          <div className="flex gap-3 w-full sm:w-auto">
-             <div className="flex bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-1 w-full sm:w-auto justify-center sm:justify-start">
-                <button 
-                  onClick={() => setFilter('all')}
-                  className={`flex-1 sm:flex-none px-3 py-1.5 text-xs rounded-md transition-all ${filter === 'all' ? 'bg-[var(--bg-main)] shadow-sm font-bold' : 'text-[var(--text-secondary)]'}`}
+          
+          <div className="flex flex-wrap gap-3 w-full lg:w-auto items-center">
+             <div className="relative">
+                <Filter size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
+                <select 
+                  value={filterCategory}
+                  onChange={(e) => setFilterCategory(e.target.value)}
+                  className="pl-9 pr-8 py-2 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] appearance-none cursor-pointer shadow-sm hover:border-[var(--accent)]/50 transition-colors"
                 >
-                  Todo
-                </button>
-                <button 
-                  onClick={() => setFilter('favorites')}
-                  className={`flex-1 sm:flex-none px-3 py-1.5 text-xs rounded-md transition-all ${filter === 'favorites' ? 'bg-[var(--bg-main)] shadow-sm font-bold text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}
-                >
-                  Favoritos
-                </button>
+                  <option value="">Todas las categorías</option>
+                  {CATEGORIES.map(cat => <option key={cat.value} value={cat.value}>{cat.label}</option>)}
+                </select>
              </div>
-            <Button onClick={() => openEditor(null)} className="hidden md:flex">
+
+             <div className="flex bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-1 shadow-sm">
+                <button onClick={() => setFilterType('all')} className={`px-4 py-1.5 text-xs rounded-md transition-all ${filterType === 'all' ? 'bg-[var(--bg-main)] shadow-sm font-bold text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>Todo</button>
+                <button onClick={() => setFilterType('favorites')} className={`px-4 py-1.5 text-xs rounded-md transition-all ${filterType === 'favorites' ? 'bg-[var(--bg-main)] shadow-sm font-bold text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>Favoritos</button>
+             </div>
+
+            <Button onClick={() => openEditor(null)} className="gap-2 shadow-lg shadow-[var(--accent)]/20">
               <Plus size={18} /> Nuevo
             </Button>
           </div>
         </div>
 
-        {/* GRID DE SNIPPETS */}
-        {loadingSnippets ? (
-           <div className="text-center py-20 text-[var(--text-secondary)] animate-pulse">Cargando librería...</div>
-        ) : filteredSnippets.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
-            {filteredSnippets.map(snippet => (
-              <SnippetCard 
-                key={snippet.id} 
-                snippet={snippet} 
-                onCopy={handleCopy}
-                onEdit={openEditor}
-                onDelete={handleDelete}
-                onToggleFav={handleToggleFav}
-              />
-            ))}
-          </div>
+        {isLoading ? (
+           <div className="flex justify-center py-20"><Loader className="animate-spin text-[var(--accent)]" size={40} /></div>
+        ) : snippets.length > 0 ? (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
+              {snippets.map(snippet => (
+                <SnippetCard 
+                  key={snippet.id} 
+                  snippet={snippet} 
+                  onCopy={(s) => { navigator.clipboard.writeText(s.code); toast.success('Copiado'); }}
+                  onEdit={openEditor}
+                  onDelete={(id) => { if(confirm('¿Eliminar?')) deleteMutation.mutate(id) }}
+                  onToggleFav={(id, status) => toggleFavMutation.mutate({ id, is_favorite: !status })}
+                />
+              ))}
+            </div>
+
+            {hasNextPage && (
+              <div className="mt-10 text-center">
+                <button 
+                  onClick={() => fetchNextPage()} 
+                  disabled={isFetchingNextPage}
+                  className="px-6 py-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-full hover:border-[var(--accent)] hover:text-[var(--accent)] transition-all font-medium flex items-center gap-2 mx-auto shadow-sm"
+                >
+                   {isFetchingNextPage ? <Loader size={18} className="animate-spin" /> : <ArrowDown size={18} />}
+                   Cargar más snippets
+                </button>
+              </div>
+            )}
+          </>
         ) : (
-          <div className="text-center py-20 opacity-50">
-            <Code2 size={48} className="mx-auto mb-4 text-[var(--text-secondary)]" />
-            <p>No se encontraron snippets.</p>
+          <div className="flex flex-col items-center justify-center py-20 opacity-50 text-center border-2 border-dashed border-[var(--border)] rounded-2xl bg-[var(--bg-card)]/50">
+            <Code2 size={64} className="mb-4 text-[var(--text-secondary)]" />
+            <h3 className="text-xl font-bold mb-2">No se encontraron resultados</h3>
+            <p className="max-w-xs mx-auto mb-6">Prueba cambiando los filtros o crea un nuevo snippet.</p>
+            <Button onClick={() => { setFilterCategory(''); setSearch(''); setFilterType('all'); }}>
+              Limpiar filtros
+            </Button>
           </div>
         )}
       </main>
 
-      {/* --- BOTTOM NAVIGATION BAR (Solo Móvil) --- */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[var(--bg-card)] border-t border-[var(--border)] flex justify-around items-center p-3 z-40 pb-6 shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
-        <Link to="/dashboard" className="flex flex-col items-center gap-1 text-[var(--accent)]">
-           <LayoutGrid size={24} />
-           <span className="text-[10px] font-bold">Mis Snippets</span>
-        </Link>
-        
-        <button 
-          onClick={() => openEditor(null)}
-          className="flex flex-col items-center justify-center -mt-8 bg-[var(--accent)] text-white w-14 h-14 rounded-full shadow-lg shadow-[var(--accent)]/40 border-4 border-[var(--bg-main)]"
-        >
-           <Plus size={28} />
-        </button>
-
-        <Link to="/explore" className="flex flex-col items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
-           <Globe size={24} />
-           <span className="text-[10px] font-medium">Explorar</span>
-        </Link>
-      </nav>
-
-      {/* --- MODAL EDITOR --- */}
       {isEditorOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[var(--bg-card)] w-full max-w-5xl rounded-2xl shadow-2xl border border-[var(--border)] flex flex-col h-[90vh] animate-in zoom-in duration-200">
-            
-            {/* Modal Header */}
-            <div className="p-4 border-b border-[var(--border)] flex justify-between items-center">
-              <h3 className="font-bold text-lg">{currentSnippet ? 'Editar Snippet' : 'Nuevo Snippet'}</h3>
-              <button onClick={() => setIsEditorOpen(false)} className="p-2 hover:bg-[var(--bg-main)] rounded-full text-[var(--text-secondary)]">
+          <div className="bg-[var(--bg-card)] w-full max-w-6xl h-[90vh] rounded-2xl shadow-2xl border border-[var(--border)] flex flex-col animate-zoom-in overflow-hidden">
+            <div className="p-4 border-b border-[var(--border)] flex justify-between items-center bg-[var(--bg-main)]">
+              <div className="flex items-center gap-3">
+                <div className="bg-[var(--accent)]/20 p-2 rounded-lg text-[var(--accent)]">
+                  {currentSnippet ? <Settings size={20} /> : <Plus size={20} />}
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg leading-none">{currentSnippet ? 'Editar Snippet' : 'Nuevo Snippet'}</h3>
+                  <p className="text-[10px] text-[var(--text-secondary)] mt-1 flex items-center gap-1">
+                    <span className="px-1.5 py-0.5 bg-[var(--border)] rounded border border-[var(--text-secondary)]/20">Ctrl + S</span> para guardar
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setIsEditorOpen(false)} className="p-2 hover:bg-[var(--bg-card)] rounded-full text-[var(--text-secondary)] transition-colors">
                 <X size={20} />
               </button>
             </div>
             
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto custom-scrollbar flex-grow">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
-                
-                {/* Columna Izquierda: Inputs y Configuración */}
-                <div className="flex flex-col gap-4">
-                  <Input 
-                    label="Título" 
-                    placeholder="Ej: Query de usuarios activos" 
-                    value={formTitle}
-                    onChange={(e) => setFormTitle(e.target.value)}
-                    autoFocus
-                  />
-                  <Input 
-                    label="Descripción" 
-                    placeholder="Breve explicación..." 
-                    value={formDesc}
-                    onChange={(e) => setFormDesc(e.target.value)}
-                  />
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* Selector de Lenguaje */}
-                    <div className="flex flex-col gap-1.5">
-                       <label className="text-xs uppercase tracking-wider opacity-60 font-bold">Lenguaje</label>
-                       <select 
-                          className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-md px-3 py-2.5 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] transition-colors"
-                          value={formLanguage}
-                          onChange={(e) => setFormLanguage(e.target.value)}
-                       >
-                          <option value="python">Python</option>
-                          <option value="java">Java</option>
-                          <option value="scala">Scala</option>
-                          <option value="r">R Stats</option>
-                          <option value="sql">SQL</option>
-                       </select>
-                    </div>
-
-                    {/* Selector de Categoría */}
-                    <div className="flex flex-col gap-1.5">
-                       <label className="text-xs uppercase tracking-wider opacity-60 font-bold">Categoría</label>
-                       <select 
-                          className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-md px-3 py-2.5 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] transition-colors"
-                          value={formCategory}
-                          onChange={(e) => setFormCategory(e.target.value)}
-                       >
-                          <option value="general">General</option>
-                          <option value="scraping">Scraping</option>
-                          <option value="pandas">Data Analysis</option>
-                          <option value="automatización">Automatización</option>
-                          <option value="validaciones">Validaciones</option>
-                          <option value="archivos">Archivos</option>
-                          <option value="api">APIs</option>
-                          <option value="db">Base de Datos</option>
-                       </select>
-                    </div>
+            <div className="flex-grow flex flex-col md:flex-row overflow-hidden">
+              <div className="w-full md:w-1/3 p-6 overflow-y-auto border-b md:border-b-0 md:border-r border-[var(--border)] bg-[var(--bg-main)]/50">
+                <div className="space-y-4">
+                  <Input label="Título" placeholder="Ej: Autenticación JWT" value={formTitle} onChange={(e) => setFormTitle(e.target.value)} autoFocus />
+                  <div className="flex flex-col gap-1.5 mb-4">
+                    <label className="text-xs uppercase tracking-wider opacity-70 font-bold text-[var(--text-secondary)] ml-1">Descripción</label>
+                    <textarea 
+                      className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 transition-all resize-none h-24 text-sm"
+                      placeholder="¿Qué hace este código?"
+                      value={formDesc}
+                      onChange={(e) => setFormDesc(e.target.value)}
+                    />
                   </div>
-
-                  {/* Input de Etiquetas (Tags) */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <Select label="Lenguaje" value={formLanguage} onChange={(e) => setFormLanguage(e.target.value)} options={LANGUAGES} />
+                    <Select label="Categoría" value={formCategory} onChange={(e) => setFormCategory(e.target.value)} options={CATEGORIES} />
+                  </div>
                   <div className="flex flex-col gap-1.5 mt-2">
-                    <label className="text-xs uppercase tracking-wider opacity-60 font-bold">Etiquetas (Tags)</label>
+                    <label className="text-xs uppercase tracking-wider opacity-70 font-bold text-[var(--text-secondary)] ml-1">Etiquetas</label>
                     <div className="flex gap-2">
                       <input
-                        className="flex-grow bg-[var(--bg-card)] border border-[var(--border)] rounded-md px-3 py-2.5 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] transition-all text-sm"
-                        placeholder="Escribe una etiqueta y pulsa Enter..."
+                        className="flex-grow bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] text-sm focus:ring-2 focus:ring-[var(--accent)]/20"
+                        placeholder="Añadir tag (Enter)"
                         value={tagInput}
                         onChange={(e) => setTagInput(e.target.value)}
                         onKeyDown={handleAddTag}
                       />
-                      <Button variant="secondary" onClick={handleAddTag} className="!px-3">
-                        <Plus size={16} />
-                      </Button>
+                      <Button variant="secondary" onClick={handleAddTag} className="!px-3 !py-2"><Plus size={16} /></Button>
                     </div>
-                    
-                    {/* Lista de Tags Agregadas */}
-                    <div className="flex flex-wrap gap-2 mt-2 min-h-[2rem]">
+                    <div className="flex flex-wrap gap-2 mt-2 min-h-[32px]">
                       {formTags.map(tag => (
-                        <span key={tag} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-main)] border border-[var(--border)] text-xs text-[var(--text-secondary)] animate-fade-in">
+                        <span key={tag} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--accent)]/10 border border-[var(--accent)]/20 text-xs text-[var(--accent)] font-bold animate-fade-in">
                           <Hash size={10} /> {tag}
-                          <button 
-                            onClick={() => handleRemoveTag(tag)} 
-                            className="ml-1 hover:text-red-400 transition-colors"
-                          >
-                            <X size={12} />
-                          </button>
+                          <button onClick={() => setFormTags(formTags.filter(t => t !== tag))} className="ml-1 hover:text-red-500"><X size={12} /></button>
                         </span>
                       ))}
-                      {formTags.length === 0 && (
-                        <span className="text-xs text-[var(--text-secondary)] opacity-50 italic p-1">Sin etiquetas...</span>
-                      )}
                     </div>
                   </div>
                 </div>
-
-                {/* Columna Derecha: Editor de Código */}
-                <div className="h-full min-h-[400px] flex flex-col">
-                   <label className="text-xs uppercase tracking-wider opacity-60 font-bold mb-2 block">Código {formLanguage}</label>
-                   <div className="flex-grow border border-[var(--border)] rounded-lg overflow-hidden shadow-inner bg-[#1e1e1e]">
-                     <CodeEditor 
-                        code={formCode} 
-                        onChange={setFormCode} 
-                        language={formLanguage} 
-                     />
-                   </div>
-                </div>
+              </div>
+              <div className="w-full md:w-2/3 p-4 bg-[var(--bg-card)] flex flex-col h-full">
+                 <CodeEditor code={formCode} onChange={setFormCode} language={formLanguage} />
               </div>
             </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-[var(--border)] bg-[var(--bg-main)]/30 flex justify-end gap-3">
+            <div className="p-4 border-t border-[var(--border)] bg-[var(--bg-main)] flex justify-end gap-3 items-center">
+              <span className="text-xs text-[var(--text-secondary)] mr-auto hidden md:inline">Los cambios pueden tardar unos segundos.</span>
               <Button variant="secondary" onClick={() => setIsEditorOpen(false)}>Cancelar</Button>
-              <Button onClick={handleSave}>
-                <Save size={18} /> Guardar Snippet
+              <Button onClick={handleSave} disabled={saveMutation.isPending} className="min-w-[140px]">
+                {saveMutation.isPending ? 'Guardando...' : <><Save size={18} /> Guardar</>}
               </Button>
             </div>
           </div>

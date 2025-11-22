@@ -8,13 +8,13 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Verificar sesión actual
+    // Verificar sesión actual
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
-    // 2. Escuchar cambios en la autenticación (login, logout)
+    // Escuchar cambios
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       setLoading(false);
@@ -24,13 +24,18 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const signUp = (email, password) => supabase.auth.signUp({ email, password });
-  
   const signIn = (email, password) => supabase.auth.signInWithPassword({ email, password });
-  
   const signOut = () => supabase.auth.signOut();
+  
+  // Nueva función: Actualizar perfil (password o metadatos)
+  const updateProfile = async (updates) => {
+    const { data, error } = await supabase.auth.updateUser(updates);
+    if (error) throw error;
+    return data;
+  };
 
   return (
-    <AuthContext.Provider value={{ user, signUp, signIn, signOut, loading }}>
+    <AuthContext.Provider value={{ user, signUp, signIn, signOut, updateProfile, loading }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Globe, Search, Moon, Sun, LogOut, LayoutGrid, Code2, Users, Plus } from 'lucide-react'; 
+import { useState } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { Globe, Search, Moon, Sun, LogOut, LayoutGrid, Loader, ArrowDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
@@ -11,118 +12,101 @@ export default function Explore() {
   const { signOut, user } = useAuth();
   const { toggleTheme, isDark } = useTheme();
   const toast = useToast();
-  
-  const [snippets, setSnippets] = useState([]);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchPublicSnippets();
-  }, );
+  // --- REACT QUERY: Paginación Infinita ---
+  const fetchPublicSnippets = async ({ pageParam = 0 }) => {
+    const ITEMS_PER_PAGE = 12;
+    const from = pageParam * ITEMS_PER_PAGE;
+    const to = from + ITEMS_PER_PAGE - 1;
 
-  async function fetchPublicSnippets() {
-    try {
-      // CAMBIO IMPORTANTE: Ahora filtramos por 'in_community'
-      const { data, error } = await supabase
-        .from('snippets')
-        .select('*')
-        .eq('in_community', true) // <--- Solo los publicados explícitamente
-        .neq('user_id', user.id) 
-        .order('created_at', { ascending: false })
-        .limit(200); 
-        
-      if (error) throw error;
-      
-      const validSnippets = (data || []).filter(s => 
-        !s.public_expires_at || new Date(s.public_expires_at) > new Date()
-      );
-      
-      setSnippets(validSnippets);
-    } catch (error) {
-      console.error(error);
-      toast.error('Error cargando catálogo');
-    } finally {
-      setLoading(false);
+    let query = supabase
+      .from('snippets')
+      .select('*')
+      .eq('in_community', true)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    // Si hay búsqueda, usamos ilike (requiere índice en BD para performance óptima)
+    if (search) {
+      query = query.ilike('title', `%${search}%`);
     }
-  }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    
+    // NOTA: El filtrado de expiración debe hacerse en el BACKEND con RLS
+    // para seguridad real. Aquí solo filtramos visualmente por si acaso.
+    return data.filter(s => !s.public_expires_at || new Date(s.public_expires_at) > new Date());
+  };
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading
+  } = useInfiniteQuery({
+    queryKey: ['explore', search], // Se recarga al cambiar búsqueda
+    queryFn: fetchPublicSnippets,
+    getNextPageParam: (lastPage, allPages) => {
+      return lastPage.length === 12 ? allPages.length : undefined;
+    },
+    staleTime: 1000 * 60 * 2 // Cache de 2 min
+  });
+
+  const snippets = data?.pages.flat() || [];
 
   const handleClone = async (snippet) => {
     if (!confirm(`¿Guardar "${snippet.title}" en tu colección personal?`)) return;
-
     try {
-      const newSnippet = {
+      const { error } = await supabase.from('snippets').insert([{
         user_id: user.id,
-        title: `${snippet.title} (Copia)`,
+        title: `${snippet.title} (Fork)`,
         description: snippet.description,
         code: snippet.code,
         language: snippet.language,
         category: snippet.category,
         tags: snippet.tags,
-        is_public: false, 
-        in_community: false, // Al clonar, nace privado y fuera de la comunidad
-        is_favorite: false,
-        usage_count: 0
-      };
-
-      const { error } = await supabase.from('snippets').insert([newSnippet]);
+        is_public: false,
+        in_community: false,
+        original_id: snippet.id // Guardamos referencia para futuro
+      }]);
       if (error) throw error;
-
       toast.success('Snippet guardado en tu Dashboard');
-    } catch (error) {
-        console.error(error);
-      toast.error('Error al guardar snippet');
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al clonar');
     }
   };
 
-  const handleCopy = (snippet) => {
-    navigator.clipboard.writeText(snippet.code);
-    toast.success('Copiado al portapapeles');
-  };
-
-  const filteredSnippets = useMemo(() => {
-    return snippets.filter(s => {
-      const searchLower = search.toLowerCase();
-      return s.title.toLowerCase().includes(searchLower) || 
-             s.code.toLowerCase().includes(searchLower) ||
-             (s.tags && s.tags.some(tag => tag.toLowerCase().includes(searchLower)));
-    });
-  }, [snippets, search]);
-
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg-main)] pb-20 md:pb-0">
-      {/* Header */}
-      <header className="h-16 border-b border-[var(--border)] bg-[var(--bg-card)] sticky top-0 z-10 px-6 flex items-center justify-between">
+    <div className="min-h-screen flex flex-col bg-[var(--bg-main)]">
+      <header className="h-16 border-b border-[var(--border)] bg-[var(--bg-card)] sticky top-0 z-30 px-6 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-3">
-            <div className="bg-[var(--accent)] text-white p-1.5 rounded-md">
-              <Users size={20} />
+            <div className="bg-[var(--accent)] text-white p-1.5 rounded-md shadow-lg shadow-[var(--accent)]/20">
+              <Globe size={20} />
             </div>
-            <span className="font-bold text-lg tracking-tight hidden sm:block">Explorar Catálogo</span>
+            <span className="font-bold text-lg tracking-tight hidden sm:block text-[var(--text-primary)]">Comunidad</span>
           </div>
-          
           <nav className="hidden md:flex gap-1 bg-[var(--bg-main)] p-1 rounded-lg border border-[var(--border)]">
-             <Link to="/dashboard" className="px-4 py-1.5 text-sm rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)] transition-all">
-                Mis Snippets
-             </Link>
-             <span className="px-4 py-1.5 text-sm rounded-md bg-[var(--bg-card)] shadow-sm font-bold text-[var(--accent)]">
-                Explorar
-             </span>
+             <Link to="/dashboard" className="px-4 py-1.5 text-sm rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)] transition-all">Mis Snippets</Link>
+             <span className="px-4 py-1.5 text-sm rounded-md bg-[var(--bg-card)] shadow-sm font-bold text-[var(--accent)] cursor-default">Explorar</span>
           </nav>
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Buscador Desktop */}
-          <div className="hidden md:flex items-center gap-2 bg-[var(--bg-main)] px-3 py-1.5 rounded-lg border border-[var(--border)]">
+          <div className="hidden md:flex items-center gap-2 bg-[var(--bg-main)] px-3 py-1.5 rounded-lg border border-[var(--border)] focus-within:border-[var(--accent)] transition-colors">
             <Search size={16} className="text-[var(--text-secondary)]" />
             <input 
               type="text" 
-              placeholder="Buscar en la comunidad..." 
-              className="bg-transparent border-none focus:outline-none text-sm w-48"
+              placeholder="Buscar en comunidad..." 
+              className="bg-transparent border-none focus:outline-none text-sm w-48 text-[var(--text-primary)]"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          
           <button onClick={toggleTheme} className="p-2 hover:bg-[var(--bg-main)] rounded-full transition-colors text-[var(--text-primary)]">
             {isDark ? <Sun size={20} /> : <Moon size={20} />}
           </button>
@@ -133,66 +117,48 @@ export default function Explore() {
         </div>
       </header>
 
-      <main className="flex-grow p-4 md:p-6 max-w-7xl mx-auto w-full">
-        
-        {/* --- BUSCADOR MÓVIL --- */}
-        <div className="md:hidden mb-6">
-          <div className="flex items-center gap-2 bg-[var(--bg-card)] px-4 py-3 rounded-xl border border-[var(--border)] shadow-sm focus-within:border-[var(--accent)] transition-colors">
-            <Search size={18} className="text-[var(--text-secondary)]" />
-            <input 
-              type="text" 
-              placeholder="Buscar en la comunidad..." 
-              className="bg-transparent border-none focus:outline-none text-base w-full text-[var(--text-primary)]"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+      <main className="flex-grow p-6 max-w-7xl mx-auto w-full">
+        <div className="mb-8 text-center md:text-left">
+            <h2 className="text-3xl font-bold mb-2 text-[var(--text-primary)]">Catálogo Global</h2>
+            <p className="text-[var(--text-secondary)]">Descubre soluciones verificadas por desarrolladores de todo el mundo.</p>
         </div>
 
-        <div className="mb-8">
-            <h2 className="text-2xl font-bold mb-1">Catálogo Comunitario</h2>
-            <p className="text-[var(--text-secondary)] text-sm">Descubre snippets verificados por la comunidad. Recuerda revisar el código antes de usarlo.</p>
-        </div>
-
-        {loading ? (
-           <div className="text-center py-20 text-[var(--text-secondary)] animate-pulse">Cargando catálogo...</div>
-        ) : filteredSnippets.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
-            {filteredSnippets.map(snippet => (
-              <SnippetCard 
-                key={snippet.id} 
-                snippet={snippet} 
-                onCopy={handleCopy}
-                onClone={handleClone}
-                isExploreMode={true} 
-              />
-            ))}
-          </div>
+        {isLoading ? (
+           <div className="flex justify-center py-20"><Loader className="animate-spin text-[var(--accent)]" size={40} /></div>
+        ) : snippets.length > 0 ? (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
+              {snippets.map(snippet => (
+                <SnippetCard 
+                  key={snippet.id} 
+                  snippet={snippet} 
+                  onCopy={(s) => { navigator.clipboard.writeText(s.code); toast.success('Copiado'); }}
+                  onClone={handleClone}
+                  isExploreMode={true} 
+                />
+              ))}
+            </div>
+            
+            {hasNextPage && (
+              <div className="mt-10 text-center">
+                <button 
+                  onClick={() => fetchNextPage()} 
+                  disabled={isFetchingNextPage}
+                  className="px-6 py-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-full hover:border-[var(--accent)] hover:text-[var(--accent)] transition-all font-medium flex items-center gap-2 mx-auto shadow-sm"
+                >
+                   {isFetchingNextPage ? <Loader size={18} className="animate-spin" /> : <ArrowDown size={18} />}
+                   Cargar más snippets
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <div className="text-center py-20 opacity-50">
             <LayoutGrid size={48} className="mx-auto mb-4 text-[var(--text-secondary)]" />
-            <p>No hay snippets públicos disponibles en este momento.</p>
+            <p>No se encontraron resultados para tu búsqueda.</p>
           </div>
         )}
       </main>
-
-      {/* --- BOTTOM NAVIGATION BAR (Solo Móvil) --- */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[var(--bg-card)] border-t border-[var(--border)] flex justify-around items-center p-3 z-40 pb-6 shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
-        <Link to="/dashboard" className="flex flex-col items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
-           <LayoutGrid size={24} />
-           <span className="text-[10px] font-medium">Mis Snippets</span>
-        </Link>
-        
-        <Link to="/dashboard" className="flex flex-col items-center justify-center -mt-8 bg-[var(--bg-main)] text-[var(--text-secondary)] w-14 h-14 rounded-full shadow-lg border-4 border-[var(--bg-main)] opacity-50 pointer-events-none">
-           <Plus size={28} />
-        </Link>
-
-        <Link to="/explore" className="flex flex-col items-center gap-1 text-[var(--accent)]">
-           <Globe size={24} />
-           <span className="text-[10px] font-bold">Explorar</span>
-        </Link>
-      </nav>
-
     </div>
   );
 }
